@@ -36,7 +36,6 @@ import org.voltdb.client.ClientStats;
 import org.voltdb.client.ClientStatsContext;
 import org.voltdb.client.ClientStatusListenerExt;
 import org.voltdb.client.NoConnectionsException;
-import org.voltdb.client.NullCallback;
 import org.voltdb.client.ProcCallException;
 
 /**
@@ -339,12 +338,12 @@ public class CallCenterApp {
                 if (call.endTS == null) {
                     assert(call.startTS != null);
                     client.callProcedure(/*new NullCallback(),*/ "BeginCall",
-                            call.phoneNo, call.callId, call.agentId, call.startTS);
+                            call.agentId, call.phoneNo, call.callId, call.startTS);
                 }
                 else {
                     assert(call.startTS == null);
                     client.callProcedure(/*new NullCallback(),*/ "EndCall",
-                            call.phoneNo, call.callId, call.agentId, call.endTS);
+                            call.agentId, call.phoneNo, call.callId, call.endTS);
                 }
             }
             now = System.currentTimeMillis();
@@ -373,13 +372,13 @@ public class CallCenterApp {
             else {
                 if (call.endTS == null) {
                     assert(call.startTS != null);
-                    client.callProcedure(new NullCallback(), "BeginCall",
-                            call.phoneNo, call.callId, call.agentId, call.startTS);
+                    client.callProcedure(/*new NullCallback(),*/ "BeginCall",
+                            call.agentId, call.phoneNo, call.callId, call.startTS);
                 }
                 else {
                     assert(call.startTS == null);
-                    client.callProcedure(new NullCallback(), "EndCall",
-                            call.phoneNo, call.callId, call.agentId, call.endTS);
+                    client.callProcedure(/*new NullCallback(),*/ "EndCall",
+                            call.agentId, call.phoneNo, call.callId, call.endTS);
                 }
             }
             now = System.currentTimeMillis();

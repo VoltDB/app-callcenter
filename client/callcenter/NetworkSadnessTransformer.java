@@ -56,6 +56,8 @@ public class NetworkSadnessTransformer<T> {
         bottom = bottomtemp; // because final
     }
 
+    // Based on code by Hyunsik Choi
+    // http://diveintodata.org/2009/09/zipf-distribution-generator-in-java/
     public int nextZipfDelay() {
         int value;
         double friquency = 0;

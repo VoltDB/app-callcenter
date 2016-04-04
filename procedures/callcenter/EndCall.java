@@ -24,7 +24,6 @@
 package callcenter;
 
 import org.voltdb.SQLStmt;
-import org.voltdb.VoltProcedure;
 import org.voltdb.VoltTable;
 import org.voltdb.VoltTableRow;
 import org.voltdb.types.TimestampType;
@@ -49,7 +48,7 @@ import org.voltdb.types.TimestampType;
  * to follow. A production app might offer less choice or just reuse more code.</p>
  *
  */
-public class EndCall extends VoltProcedure {
+public class EndCall extends BeginOrEndCallBase {
 
     final SQLStmt findCompletedCall = new SQLStmt(
             "SELECT * FROM completedcalls WHERE call_id = ? AND agent_id = ? AND phone_no = ?;");
@@ -81,7 +80,7 @@ public class EndCall extends VoltProcedure {
      * @return The number of deleted rows.
      * @throws VoltAbortException on bad input.
      */
-    public long run(String phone_no, long call_id, int agent_id, TimestampType end_ts) {
+    public long run(int agent_id, String phone_no, long call_id, TimestampType end_ts) {
         voltQueueSQL(findOpenCall, EXPECT_ZERO_OR_ONE_ROW, call_id, agent_id, phone_no);
         voltQueueSQL(findCompletedCall, EXPECT_ZERO_OR_ONE_ROW, call_id, agent_id, phone_no);
         VoltTable[] results = voltExecuteSQL();
@@ -104,11 +103,18 @@ public class EndCall extends VoltProcedure {
             // check if this completes the call
             TimestampType start_ts = existingCall.getTimestampAsTimestamp("start_ts");
             if (existingCall.wasNull() == false) {
-                // completes the call
-                voltQueueSQL(deleteOpenCall, EXPECT_SCALAR_MATCH(1), call_id, agent_id, phone_no);
+
                 int duration = (int) (end_ts.getTime() - start_ts.getTime());
+
+                // update per-day running stddev calculation
+                computeRunningStdDev(agent_id, end_ts, duration);
+
+                // completes the call
+                voltQueueSQL(deleteOpenCall, EXPECT_SCALAR_MATCH(1),
+                        call_id, agent_id, phone_no);
                 voltQueueSQL(insertCompletedCall, EXPECT_SCALAR_MATCH(1),
                         call_id, agent_id, phone_no, start_ts, end_ts, duration);
+
                 voltExecuteSQL(true);
                 return 0;
             }
