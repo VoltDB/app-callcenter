@@ -24,13 +24,9 @@
 package callcenter;
 
 import java.util.ArrayDeque;
-import java.util.Arrays;
 import java.util.Date;
-import java.util.Map.Entry;
-import java.util.NavigableMap;
 import java.util.Queue;
 import java.util.Random;
-import java.util.TreeMap;
 
 public class CallSimulator {
 
@@ -39,7 +35,7 @@ public class CallSimulator {
     // random number generator with constant seed
     final Random rand = new Random(0);
 
-    final NavigableMap<Long, CallEvent[]> delayedEvents = new TreeMap<>();
+    final DelayedQueue<CallEvent> delayedEvents = new DelayedQueue<>();
 
     long currentSystemMilliTimestamp = 0;
     double targetEventsPerMillisecond;
@@ -128,20 +124,8 @@ public class CallSimulator {
         }
 
         // drain scheduled events first
-        if ((delayedEvents.size() > 0) && (delayedEvents.firstKey() < systemCurrentTimeMillis)) {
-            Entry<Long, CallEvent[]> eventEntry = delayedEvents.pollFirstEntry();
-            CallEvent[] callEvents = eventEntry.getValue();
-
-            CallEvent callEvent = callEvents[0];
-            if (callEvents.length > 1) {
-                int prevLength = callEvents.length;
-
-                callEvents = Arrays.copyOfRange(callEvents, 1, callEvents.length);
-                assert(callEvents.length == prevLength - 1);
-
-                delayedEvents.put(eventEntry.getKey(), callEvents);
-            }
-
+        CallEvent callEvent = delayedEvents.nextReady(systemCurrentTimeMillis);
+        if (callEvent != null) {
             // double check this is an end event
             assert(callEvent.startTS == null);
             assert(callEvent.endTS != null);
@@ -169,24 +153,10 @@ public class CallSimulator {
             return null;
         }
 
+        // schedule the end event
         long endTimeKey = event[1].endTS.getTime();
         assert((endTimeKey - systemCurrentTimeMillis) < (config.maxcalldurationseconds * 1000));
-
-        // schedule the end event
-        CallEvent[] callEvents = delayedEvents.get(endTimeKey);
-        if (callEvents != null) {
-            CallEvent[] callEvents2 = new CallEvent[callEvents.length + 1];
-            callEvents2[0] = event[1];
-            for (int i = 0; i < callEvents.length; i++) {
-                callEvents2[i + 1] = callEvents[i];
-            }
-            callEvents = callEvents2;
-        }
-        else {
-            callEvents = new CallEvent[] { event[1] };
-        }
-
-        delayedEvents.put(endTimeKey, callEvents);
+        delayedEvents.add(endTimeKey, event[1]);
 
         eventsSoFarThisMillisecond++;
 
@@ -196,22 +166,10 @@ public class CallSimulator {
     }
 
     CallEvent drain() {
-        Entry<Long, CallEvent[]> eventEntry = delayedEvents.pollFirstEntry();
-        if (eventEntry == null) {
+        CallEvent callEvent = delayedEvents.drain();
+        if (callEvent == null) {
             validate();
             return null;
-        }
-
-        CallEvent[] callEvents = eventEntry.getValue();
-
-        CallEvent callEvent = callEvents[0];
-        if (callEvents.length > 1) {
-            int prevLength = callEvents.length;
-
-            callEvents = Arrays.copyOfRange(callEvents, 1, callEvents.length);
-            assert(callEvents.length == prevLength - 1);
-
-            delayedEvents.put(eventEntry.getKey(), callEvents);
         }
 
         // double check this is an end event
@@ -227,10 +185,7 @@ public class CallSimulator {
     }
 
     private void validate() {
-        long delayedEventCount = 0;
-        for (Entry<Long, CallEvent[]> entry : delayedEvents.entrySet()) {
-            delayedEventCount += entry.getValue().length;
-        }
+        long delayedEventCount = delayedEvents.size();
 
         long outstandingAgents = config.agents - agentsAvailable.size();
         long outstandingPhones = config.numbers - phoneNumbersAvailable.size();

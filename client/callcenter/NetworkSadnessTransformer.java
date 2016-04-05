@@ -23,9 +23,7 @@
 
 package callcenter;
 
-import java.util.NavigableMap;
 import java.util.Random;
-import java.util.TreeMap;
 
 public class NetworkSadnessTransformer<T> {
 
@@ -35,7 +33,7 @@ public class NetworkSadnessTransformer<T> {
     // random number generator with constant seed
     final Random rand = new Random(1);
 
-    final NavigableMap<Long, T> queue = new TreeMap<>();
+    final DelayedQueue<T> delayed = new DelayedQueue<>();
 
     // for zipf generation
     private final int size;
@@ -84,13 +82,13 @@ public class NetworkSadnessTransformer<T> {
         }
 
         long delayms = nextZipfDelay();
-        queue.put(systemCurrentTimeMillis + delayms, event);
+        delayed.add(systemCurrentTimeMillis + delayms, event);
     }
 
     @SuppressWarnings("unchecked")
     T next(long systemCurrentTimeMillis) {
         // drain all the waiting messages from the source (up to 10k)
-        /*while (queue.size() < 10000) {
+        while (delayed.size() < 10000) {
             T event = (T) simulator.next(systemCurrentTimeMillis);
             if (event == null) {
                 break;
@@ -98,18 +96,10 @@ public class NetworkSadnessTransformer<T> {
             transformAndQueue(event, systemCurrentTimeMillis);
         }
 
-        if ((queue.size() > 0) && (queue.firstKey() < systemCurrentTimeMillis)) {
-            Entry<Long, T> eventEntry = queue.pollFirstEntry();
-            return eventEntry.getValue();
-        }
-
-        return null;*/
-
-        return (T) simulator.next(systemCurrentTimeMillis);
+        return delayed.nextReady(systemCurrentTimeMillis);
     }
 
-    @SuppressWarnings("unchecked")
     T drain() {
-        return (T) simulator.drain();
+        return delayed.drain();
     }
 }
