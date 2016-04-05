@@ -23,8 +23,10 @@
 
 package callcenter;
 
+import java.util.ArrayDeque;
 import java.util.Map.Entry;
 import java.util.NavigableMap;
+import java.util.Queue;
 import java.util.Random;
 import java.util.TreeMap;
 
@@ -44,21 +46,45 @@ public class CallSimulator {
     long targetEventsThisMillisecond;
     long eventsSoFarThisMillisecond;
 
-    int lastAgentIdUsed = 0;
     long lastCallIdUsed = 0;
+
+    Queue<Integer> agentsAvailable = new ArrayDeque<>();
+    Queue<Long> phoneNumbersAvailable = new ArrayDeque<>();
 
     CallSimulator(CallCenterApp.CallCenterConfig config) {
         this.config = config;
         targetEventsPerMillisecond = 5;
+
+        // generate agents
+        for (int i = 0; i < config.agents; i++) {
+            agentsAvailable.add(i);
+        }
+
+        // generate phone numbers
+        for (int i = 0; i < config.numbers; i++) {
+            // random area code between 200 and 799
+            long areaCode = rand.nextInt(600) + 200;
+            // random exchange between 200 and 999
+            long exhange = rand.nextInt(800) + 200;
+            // full random number
+            long phoneNo = areaCode * 10000000 + exhange * 10000 + rand.nextInt(9999);
+            phoneNumbersAvailable.add(phoneNo);
+        }
     }
 
     CallEvent[] makeRandomEvent() {
         long callId = ++lastCallIdUsed;
-        // next one handles integer overflow
-        int agentId = (lastAgentIdUsed == Integer.MAX_VALUE) ? 0 : lastAgentIdUsed + 1;
-        lastAgentIdUsed = agentId;
-        String phoneNo = String.format("+1 (%d) %d-%d",
-                rand.nextInt(1000), rand.nextInt(1000), rand.nextInt(10000));
+
+        // get agentid
+        Integer agentId = agentsAvailable.poll();
+        if (agentId == null) {
+            return null;
+        }
+
+        // get phone number
+        Long phoneNo = phoneNumbersAvailable.poll();
+        assert(phoneNo != null);
+
         // voltdb timestamp type uses micros from epoch
         TimestampType startTS = new TimestampType(currentSystemMilliTimestamp * 1000);
         long durationms = -1;
@@ -100,11 +126,26 @@ public class CallSimulator {
         // drain scheduled events first
         if ((delayedEvents.size() > 0) && (delayedEvents.firstKey() < systemCurrentTimeMillis)) {
             Entry<Long, CallEvent> eventEntry = delayedEvents.pollFirstEntry();
-            return eventEntry.getValue();
+            CallEvent callEvent = eventEntry.getValue();
+
+            // double check this is an end event
+            assert(callEvent.startTS == null);
+            assert(callEvent.endTS != null);
+
+            // return the agent/phone for this event to the available lists
+            agentsAvailable.add(callEvent.agentId);
+            phoneNumbersAvailable.add(callEvent.phoneNo);
+
+            return callEvent;
         }
 
         // generate rando event (begin/end pair)
         CallEvent[] event = makeRandomEvent();
+        // this means all agents are busy
+        if (event == null) {
+            return null;
+        }
+
         // schedule the end event
         delayedEvents.put(event[1].endTS.getTime() / 1000, event[1]);
 

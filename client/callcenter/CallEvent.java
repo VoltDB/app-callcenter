@@ -28,15 +28,20 @@ import org.voltdb.types.TimestampType;
 public class CallEvent {
     final long callId;
     final int agentId;
-    final String phoneNo;
+    final long phoneNo;
     final TimestampType startTS;
     final TimestampType endTS;
 
-    CallEvent(long callId, int agentId, String phoneNo, TimestampType startTS, TimestampType endTS) {
+    CallEvent(long callId, int agentId, long phoneNo, TimestampType startTS, TimestampType endTS) {
         this.callId = callId;
         this.agentId = agentId;
         this.phoneNo = phoneNo;
         this.startTS = startTS;
         this.endTS = endTS;
+    }
+
+    public String phoneNoStr() {
+        return String.format("+1 (%d) %d-%04d",
+                phoneNo / 10000000, (phoneNo / 10000) % 1000, phoneNo % 10000);
     }
 }

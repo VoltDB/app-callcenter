@@ -88,8 +88,11 @@ public class CallCenterApp {
         @Option(desc = "Stats file.")
         String statsfile = "";
 
-        @Option(desc = "Global maximum row target. Zero if using history target.")
-        long agents = 5000;
+        @Option(desc = "Number of call center agents.")
+        long agents = 3000;
+
+        @Option(desc = "Total count of phone numbers.")
+        long numbers = 1500000;
 
         @Option(desc = "Global maximum history targert. Zero if using row count target.")
         long timefactor = 60;
@@ -338,12 +341,12 @@ public class CallCenterApp {
                 if (call.endTS == null) {
                     assert(call.startTS != null);
                     client.callProcedure(/*new NullCallback(),*/ "BeginCall",
-                            call.agentId, call.phoneNo, call.callId, call.startTS);
+                            call.agentId, call.phoneNoStr(), call.callId, call.startTS);
                 }
                 else {
                     assert(call.startTS == null);
                     client.callProcedure(/*new NullCallback(),*/ "EndCall",
-                            call.agentId, call.phoneNo, call.callId, call.endTS);
+                            call.agentId, call.phoneNoStr(), call.callId, call.endTS);
                 }
             }
             now = System.currentTimeMillis();
@@ -373,12 +376,12 @@ public class CallCenterApp {
                 if (call.endTS == null) {
                     assert(call.startTS != null);
                     client.callProcedure(/*new NullCallback(),*/ "BeginCall",
-                            call.agentId, call.phoneNo, call.callId, call.startTS);
+                            call.agentId, call.phoneNoStr(), call.callId, call.startTS);
                 }
                 else {
                     assert(call.startTS == null);
                     client.callProcedure(/*new NullCallback(),*/ "EndCall",
-                            call.agentId, call.phoneNo, call.callId, call.endTS);
+                            call.agentId, call.phoneNoStr(), call.callId, call.endTS);
                 }
             }
             now = System.currentTimeMillis();

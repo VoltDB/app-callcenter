@@ -53,18 +53,23 @@ public abstract class BeginOrEndCallBase extends VoltProcedure {
 
         if (stddevTable.getRowCount() == 1) {
             VoltTableRow stddevRow = stddevTable.fetchRow(0);
-            n = stddevRow.getLong("n");
+            nprev = stddevRow.getLong("n");
             sumprev = stddevRow.getLong("sumk");
             qprev = stddevRow.getDouble("qk");
         }
 
         n = nprev + 1;
         sum = sumprev + duration;
-        avgprev = sumprev / (double) nprev;
+        avgprev = nprev > 0 ? (sumprev / (double) nprev) : 0;
         avg = sum / (double) n;
 
         q = qprev + (duration - avgprev) * (duration - avg);
         stddev = Math.sqrt(q / n);
+
+        // really basic validity checks that the math hasn't corrupted something
+        if (!Double.isFinite(q)) { throw new VoltAbortException("q is not finite"); }
+        if (!Double.isFinite(avg)) { throw new VoltAbortException("avg is not finite"); }
+        if (!Double.isFinite(stddev)) { throw new VoltAbortException("stddev is not finite"); }
 
         voltQueueSQL(upsertTodaysStddevStatsForAgent, EXPECT_SCALAR_MATCH(1),
                 agent_id, end_ts, n, sum, q, stddev);
