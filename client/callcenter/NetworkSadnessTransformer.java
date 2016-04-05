@@ -99,7 +99,13 @@ public class NetworkSadnessTransformer<T> {
         return delayed.nextReady(systemCurrentTimeMillis);
     }
 
+    @SuppressWarnings("unchecked")
     T drain() {
-        return delayed.drain();
+        T event = delayed.drain();
+        if (event != null) {
+            return event;
+        }
+
+        return (T) simulator.drain();
     }
 }
