@@ -24,13 +24,13 @@
 package callcenter;
 
 import java.util.ArrayDeque;
+import java.util.Arrays;
+import java.util.Date;
 import java.util.Map.Entry;
 import java.util.NavigableMap;
 import java.util.Queue;
 import java.util.Random;
 import java.util.TreeMap;
-
-import org.voltdb.types.TimestampType;
 
 public class CallSimulator {
 
@@ -39,12 +39,15 @@ public class CallSimulator {
     // random number generator with constant seed
     final Random rand = new Random(0);
 
-    final NavigableMap<Long, CallEvent> delayedEvents = new TreeMap<>();
+    final NavigableMap<Long, CallEvent[]> delayedEvents = new TreeMap<>();
 
     long currentSystemMilliTimestamp = 0;
     double targetEventsPerMillisecond;
     long targetEventsThisMillisecond;
     long eventsSoFarThisMillisecond;
+
+    long drainedEvents = 0;
+    long createdEvents = 0;
 
     long lastCallIdUsed = 0;
 
@@ -86,12 +89,18 @@ public class CallSimulator {
         assert(phoneNo != null);
 
         // voltdb timestamp type uses micros from epoch
-        TimestampType startTS = new TimestampType(currentSystemMilliTimestamp * 1000);
+        Date startTS = new Date(currentSystemMilliTimestamp);
+
         long durationms = -1;
-        while (durationms < 0) {
-            durationms = (long) (rand.nextGaussian() * config.meancalldurationseconds * 1000.0 / 2.0) + (config.meancalldurationseconds * 1000);
+        long meancalldurationms = config.meancalldurationseconds * 1000;
+        long maxcalldurationms = config.maxcalldurationseconds * 1000;
+        double stddev = meancalldurationms / 2.0;
+
+        // repeat until in the range (0..maxcalldurationms]
+        while ((durationms <= 0) || (durationms > maxcalldurationms)) {
+            durationms = (long) (rand.nextGaussian() * stddev) + meancalldurationms;
         }
-        TimestampType endTS = new TimestampType(((startTS.getTime() / 1000) + durationms) * 1000);
+        Date endTS = new Date(startTS.getTime() + durationms);
 
         CallEvent[] event = new CallEvent[2];
         event[0] = new CallEvent(callId, agentId, phoneNo, startTS, null);
@@ -118,15 +127,20 @@ public class CallSimulator {
             currentSystemMilliTimestamp = systemCurrentTimeMillis;
         }
 
-        // check if we made all the target events for this 1ms window
-        if (targetEventsThisMillisecond == eventsSoFarThisMillisecond) {
-            return null;
-        }
-
         // drain scheduled events first
         if ((delayedEvents.size() > 0) && (delayedEvents.firstKey() < systemCurrentTimeMillis)) {
-            Entry<Long, CallEvent> eventEntry = delayedEvents.pollFirstEntry();
-            CallEvent callEvent = eventEntry.getValue();
+            Entry<Long, CallEvent[]> eventEntry = delayedEvents.pollFirstEntry();
+            CallEvent[] callEvents = eventEntry.getValue();
+
+            CallEvent callEvent = callEvents[0];
+            if (callEvents.length > 1) {
+                int prevLength = callEvents.length;
+
+                callEvents = Arrays.copyOfRange(callEvents, 1, callEvents.length);
+                assert(callEvents.length == prevLength - 1);
+
+                delayedEvents.put(eventEntry.getKey(), callEvents);
+            }
 
             // double check this is an end event
             assert(callEvent.startTS == null);
@@ -136,21 +150,105 @@ public class CallSimulator {
             agentsAvailable.add(callEvent.agentId);
             phoneNumbersAvailable.add(callEvent.phoneNo);
 
+            validate();
+            drainedEvents++;
             return callEvent;
+        }
+
+        // check if we made all the target events for this 1ms window
+        if (targetEventsThisMillisecond == eventsSoFarThisMillisecond) {
+            validate();
+            return null;
         }
 
         // generate rando event (begin/end pair)
         CallEvent[] event = makeRandomEvent();
         // this means all agents are busy
         if (event == null) {
+            validate();
             return null;
         }
 
+        long endTimeKey = event[1].endTS.getTime();
+        assert((endTimeKey - systemCurrentTimeMillis) < (config.maxcalldurationseconds * 1000));
+
         // schedule the end event
-        delayedEvents.put(event[1].endTS.getTime() / 1000, event[1]);
+        CallEvent[] callEvents = delayedEvents.get(endTimeKey);
+        if (callEvents != null) {
+            CallEvent[] callEvents2 = new CallEvent[callEvents.length + 1];
+            callEvents2[0] = event[1];
+            for (int i = 0; i < callEvents.length; i++) {
+                callEvents2[i + 1] = callEvents[i];
+            }
+            callEvents = callEvents2;
+        }
+        else {
+            callEvents = new CallEvent[] { event[1] };
+        }
+
+        delayedEvents.put(endTimeKey, callEvents);
 
         eventsSoFarThisMillisecond++;
 
+        validate();
+        createdEvents++;
         return event[0];
+    }
+
+    CallEvent drain() {
+        Entry<Long, CallEvent[]> eventEntry = delayedEvents.pollFirstEntry();
+        if (eventEntry == null) {
+            validate();
+            return null;
+        }
+
+        CallEvent[] callEvents = eventEntry.getValue();
+
+        CallEvent callEvent = callEvents[0];
+        if (callEvents.length > 1) {
+            int prevLength = callEvents.length;
+
+            callEvents = Arrays.copyOfRange(callEvents, 1, callEvents.length);
+            assert(callEvents.length == prevLength - 1);
+
+            delayedEvents.put(eventEntry.getKey(), callEvents);
+        }
+
+        // double check this is an end event
+        assert(callEvent.startTS == null);
+        assert(callEvent.endTS != null);
+
+        // return the agent/phone for this event to the available lists
+        agentsAvailable.add(callEvent.agentId);
+        phoneNumbersAvailable.add(callEvent.phoneNo);
+
+        validate();
+        return callEvent;
+    }
+
+    private void validate() {
+        long delayedEventCount = 0;
+        for (Entry<Long, CallEvent[]> entry : delayedEvents.entrySet()) {
+            delayedEventCount += entry.getValue().length;
+        }
+
+        long outstandingAgents = config.agents - agentsAvailable.size();
+        long outstandingPhones = config.numbers - phoneNumbersAvailable.size();
+
+        if (outstandingAgents != outstandingPhones) {
+            throw new RuntimeException(
+                    String.format("outstandingAgents (%d) != outstandingPhones (%d)",
+                            outstandingAgents, outstandingPhones));
+        }
+        if (outstandingAgents != delayedEventCount) {
+            throw new RuntimeException(
+                    String.format("outstandingAgents (%d) != delayedEventCount (%d)",
+                            outstandingAgents, delayedEventCount));
+        }
+    }
+
+    void printSummary() {
+        System.out.printf("There are %d agents outstanding and %d phones. %d entries waiting to go.\n",
+                agentsAvailable.size(), phoneNumbersAvailable.size(), delayedEvents.size());
     }
 }

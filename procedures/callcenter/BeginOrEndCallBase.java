@@ -41,7 +41,7 @@ public abstract class BeginOrEndCallBase extends VoltProcedure {
             "         (agent_id,          curdate, n, sumk, qk, stddev) " +
             "  VALUES (       ?, TRUNCATE(DAY, ?), ?,    ?,  ?,      ?);");
 
-    void computeRunningStdDev(int agent_id, TimestampType end_ts, long duration) {
+    void computeRunningStdDev(int agent_id, TimestampType end_ts, long durationms) {
         voltQueueSQL(findTodaysStddevStatsForAgent, EXPECT_ZERO_OR_ONE_ROW, end_ts, agent_id);
         VoltTable stddevTable = voltExecuteSQL()[0];
 
@@ -59,11 +59,11 @@ public abstract class BeginOrEndCallBase extends VoltProcedure {
         }
 
         n = nprev + 1;
-        sum = sumprev + duration;
+        sum = sumprev + durationms;
         avgprev = nprev > 0 ? (sumprev / (double) nprev) : 0;
         avg = sum / (double) n;
 
-        q = qprev + (duration - avgprev) * (duration - avg);
+        q = qprev + (durationms - avgprev) * (durationms - avg);
         stddev = Math.sqrt(q / n);
 
         // really basic validity checks that the math hasn't corrupted something

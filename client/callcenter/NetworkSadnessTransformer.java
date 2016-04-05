@@ -108,4 +108,8 @@ public class NetworkSadnessTransformer<T> {
         return (T) simulator.next(systemCurrentTimeMillis);
     }
 
+    @SuppressWarnings("unchecked")
+    T drain() {
+        return (T) simulator.drain();
+    }
 }

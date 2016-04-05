@@ -104,16 +104,16 @@ public class EndCall extends BeginOrEndCallBase {
             TimestampType start_ts = existingCall.getTimestampAsTimestamp("start_ts");
             if (existingCall.wasNull() == false) {
 
-                int duration = (int) (end_ts.getTime() - start_ts.getTime());
+                int durationms = (int) ((end_ts.getTime() - start_ts.getTime()) / 1000);
 
                 // update per-day running stddev calculation
-                computeRunningStdDev(agent_id, end_ts, duration);
+                computeRunningStdDev(agent_id, end_ts, durationms);
 
                 // completes the call
                 voltQueueSQL(deleteOpenCall, EXPECT_SCALAR_MATCH(1),
                         call_id, agent_id, phone_no);
                 voltQueueSQL(insertCompletedCall, EXPECT_SCALAR_MATCH(1),
-                        call_id, agent_id, phone_no, start_ts, end_ts, duration);
+                        call_id, agent_id, phone_no, start_ts, end_ts, durationms);
 
                 voltExecuteSQL(true);
                 return 0;

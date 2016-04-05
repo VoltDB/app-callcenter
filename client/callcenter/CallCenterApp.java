@@ -74,7 +74,7 @@ public class CallCenterApp {
         int warmup = 5;
 
         @Option(desc = "Duration, in seconds.")
-        int duration = 600;
+        int duration = 120;
 
         @Option(desc = "Comma separated list of the form server[:port] to connect to.")
         String servers = "localhost";
@@ -95,18 +95,21 @@ public class CallCenterApp {
         long numbers = 1500000;
 
         @Option(desc = "Global maximum history targert. Zero if using row count target.")
-        long timefactor = 60;
-
-        @Option(desc = "Global maximum history targert. Zero if using row count target.")
         long meancalldurationseconds = 5;
+
+        @Option(desc = "Maximum call duration in seconds.")
+        long maxcalldurationseconds = 60;
 
         @Override
         public void validate() {
             if (duration <= 0) exitWithMessageAndUsage("duration must be > 0");
             if (displayinterval <= 0) exitWithMessageAndUsage("displayinterval must be > 0");
             if (agents <= 0) exitWithMessageAndUsage("agents must be > 0");
-            if (timefactor <= 0) exitWithMessageAndUsage("timefactor must be > 0");
+            if (numbers < agents) exitWithMessageAndUsage("numbers must be >= agents");
             if (meancalldurationseconds <= 0) exitWithMessageAndUsage("meancalldurationseconds must be > 0");
+            if (maxcalldurationseconds <= meancalldurationseconds) {
+                exitWithMessageAndUsage("maxcalldurationseconds must be > meancalldurationseconds");
+            }
         }
     }
 
@@ -389,6 +392,27 @@ public class CallCenterApp {
 
         // cancel periodic stats printing
         timer.cancel();
+
+        while (true) {
+            CallEvent call = networkTransformer.drain();
+
+            if (call == null) {
+                break;
+            }
+
+            if (call.endTS == null) {
+                assert(call.startTS != null);
+                client.callProcedure(/*new NullCallback(),*/ "BeginCall",
+                        call.agentId, call.phoneNoStr(), call.callId, call.startTS);
+            }
+            else {
+                assert(call.startTS == null);
+                client.callProcedure(/*new NullCallback(),*/ "EndCall",
+                        call.agentId, call.phoneNoStr(), call.callId, call.endTS);
+            }
+        }
+
+        callSimulator.printSummary();
 
         // block until all outstanding txns return
         client.drain();

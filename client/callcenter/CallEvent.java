@@ -23,16 +23,16 @@
 
 package callcenter;
 
-import org.voltdb.types.TimestampType;
+import java.util.Date;
 
 public class CallEvent {
     final long callId;
     final int agentId;
     final long phoneNo;
-    final TimestampType startTS;
-    final TimestampType endTS;
+    final Date startTS;
+    final Date endTS;
 
-    CallEvent(long callId, int agentId, long phoneNo, TimestampType startTS, TimestampType endTS) {
+    CallEvent(long callId, int agentId, long phoneNo, Date startTS, Date endTS) {
         this.callId = callId;
         this.agentId = agentId;
         this.phoneNo = phoneNo;
