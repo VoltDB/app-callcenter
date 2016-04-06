@@ -25,14 +25,20 @@ package callcenter;
 
 import java.util.Random;
 
-public class NetworkSadnessTransformer<T> {
+/**
+ * Randomly take events from an EventSource and delay and duplicate
+ * them. Uses a Zipfian distribution for delay and a fixed probablibilty
+ * of duplification.
+ */
+public class NetworkSadnessTransformer<T> implements EventSource<T> {
 
-    final CallCenterApp.CallCenterConfig config;
-    final CallSimulator simulator;
+    // Upstream source
+    final EventSource<T> source;
 
     // random number generator with constant seed
     final Random rand = new Random(1);
 
+    // uses a DelayQueue for scheduling events
     final DelayedQueue<T> delayed = new DelayedQueue<>();
 
     // for zipf generation
@@ -40,9 +46,8 @@ public class NetworkSadnessTransformer<T> {
     private final double skew;
     private final double bottom;
 
-    NetworkSadnessTransformer(CallCenterApp.CallCenterConfig config, CallSimulator simulator) {
-        this.config = config;
-        this.simulator = simulator;
+    NetworkSadnessTransformer(EventSource<T> source) {
+        this.source = source;
 
         // zipf params and setup
         size = 1;
@@ -74,6 +79,9 @@ public class NetworkSadnessTransformer<T> {
         return value;
     }
 
+    /**
+     * Possibly duplicate and delay by some random amount.
+     */
     void transformAndQueue(T event, long systemCurrentTimeMillis) {
         // if you're super unlucky, this blows up the stack
         if (rand.nextDouble() < 0.05) {
@@ -85,11 +93,20 @@ public class NetworkSadnessTransformer<T> {
         delayed.add(systemCurrentTimeMillis + delayms, event);
     }
 
-    @SuppressWarnings("unchecked")
-    T next(long systemCurrentTimeMillis) {
+    /**
+     * Return the next event that is safe for delivery or null
+     * if there are no safe objects to deliver.
+     *
+     * Null response could mean no events, or could mean all events
+     * are scheduled for the future.
+     *
+     * @param systemCurrentTimeMillis The current time.
+     */
+    @Override
+    public T next(long systemCurrentTimeMillis) {
         // drain all the waiting messages from the source (up to 10k)
         while (delayed.size() < 10000) {
-            T event = (T) simulator.next(systemCurrentTimeMillis);
+            T event = source.next(systemCurrentTimeMillis);
             if (event == null) {
                 break;
             }
@@ -99,13 +116,17 @@ public class NetworkSadnessTransformer<T> {
         return delayed.nextReady(systemCurrentTimeMillis);
     }
 
-    @SuppressWarnings("unchecked")
-    T drain() {
+    /**
+     * Ignore any scheduled delays and return events in
+     * schedule order until empty.
+     */
+    @Override
+    public T drain() {
         T event = delayed.drain();
         if (event != null) {
             return event;
         }
 
-        return (T) simulator.drain();
+        return source.drain();
     }
 }

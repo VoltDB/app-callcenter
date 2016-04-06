@@ -28,15 +28,33 @@ import java.util.Map.Entry;
 import java.util.NavigableMap;
 import java.util.TreeMap;
 
+/**
+ * Queue-like object that allows you to add items with a wall-clock
+ * schedule for making them available to de-queue.
+ *
+ * This is often used to schedule some kind of event handling in the future.
+ *
+ * @param <T>
+ */
 public class DelayedQueue<T> {
 
+    /** Map of ms timestamps to list of objects schedule for that timestamp */
     final NavigableMap<Long, Object[]> delayed = new TreeMap<>();
+    /** size maintained separately for quick response */
     protected int m_size = 0;
 
+    /**
+     * Schedule an object to be available for polling at a given timestamp (ms).
+     *
+     * @param readyTs The ms timestamp when the event is safe to deliver.
+     * @param value Object to deliver.
+     */
     public void add(long readyTs, T value) {
         Object[] values = delayed.get(readyTs);
-        if (values != null) {
 
+        // if one or more objects is already scheduled for given time
+        if (values != null) {
+            // make a list
             Object[] values2 = new Object[values.length + 1];
             values2[0] = value;
             for (int i = 0; i < values.length; i++) {
@@ -51,11 +69,22 @@ public class DelayedQueue<T> {
         m_size++;
     }
 
+    /**
+     * Return the next object that is safe for delivery or null
+     * if there are no safe objects to deliver.
+     *
+     * Null response could mean empty, or could mean all objects
+     * are scheduled for the future.
+     *
+     * @param systemCurrentTimeMillis The current time.
+     * @return Object of type T.
+     */
     public T nextReady(long systemCurrentTimeMillis) {
         if (delayed.size() == 0) {
             return null;
         }
 
+        // no ready objects
         if (delayed.firstKey() > systemCurrentTimeMillis) {
             return null;
         }
@@ -65,6 +94,9 @@ public class DelayedQueue<T> {
 
         @SuppressWarnings("unchecked")
         T value = (T) values[0];
+
+        // if this map entry had multiple values, put all but one
+        // of them back
         if (values.length > 1) {
             int prevLength = values.length;
             values = Arrays.copyOfRange(values, 1, values.length);
@@ -76,11 +108,20 @@ public class DelayedQueue<T> {
         return value;
     }
 
+    /**
+     * Ignore any scheduled delays and return events in
+     * schedule order until empty.
+     */
     public T drain() {
+        // just pretend it's the future. Woooooo.
         return nextReady(Long.MAX_VALUE);
     }
 
+    /**
+     * @return The number of events waiting to be delivered.
+     */
     public int size() {
+        // slow but correct code used for debugging
         /*int delayedCount = 0;
         for (Entry<Long, Object[]> entry : delayed.entrySet()) {
             delayedCount += entry.getValue().length;

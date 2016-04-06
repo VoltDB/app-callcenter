@@ -77,7 +77,11 @@ function client() {
     java -classpath callcenter-client.jar:$CLIENTCLASSPATH callcenter.CallCenterApp \
         --displayinterval=5 \
         --duration=120 \
-        --servers=$SERVERS
+        --servers=$SERVERS \
+        --agents=3000 \
+        --numbers=1500000 \
+        --meancalldurationseconds=5 \
+        --maxcalldurationseconds=60
 }
 
 function help() {

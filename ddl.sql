@@ -1,5 +1,5 @@
--- Table that stores values that are timestamped and
--- are partitioned by UUID.
+-- Table that stores calls that are missing either a
+-- begin or end timestamp.
 CREATE TABLE opencalls
 (
   agent_id INTEGER NOT NULL,
@@ -12,6 +12,9 @@ CREATE TABLE opencalls
 -- Partition this table to get parallelism.
 PARTITION TABLE opencalls ON COLUMN agent_id;
 
+-- Stores completed calls for as long as memory holds
+-- In a real app, this data would likely be exported to
+-- a historical store.
 CREATE TABLE completedcalls
 (
   agent_id INTEGER NOT NULL,
@@ -28,6 +31,10 @@ CREATE TABLE completedcalls
 );
 PARTITION TABLE completedcalls ON COLUMN agent_id;
 
+-- Ordered index on timestamp value allows for quickly finding timestamp
+-- values as well as quickly finding rows by offset.
+CREATE INDEX end_ts_index ON completedcalls (end_ts);
+
 CREATE TABLE stddevbyagent
 (
   agent_id INTEGER NOT NULL,
@@ -43,15 +50,17 @@ CREATE TABLE stddevbyagent
 );
 PARTITION TABLE stddevbyagent ON COLUMN agent_id;
 
--- Ordered index on timestamp value allows for quickly finding timestamp
--- values as well as quickly finding rows by offset.
--- Used by all 4 of the deleting stored procedures.
-CREATE INDEX end_ts_index ON completedcalls (end_ts);
-
 -- Update classes from jar to that server will know about classes but not procedures yet.
 LOAD CLASSES callcenter-procs.jar;
 
 -- stored procedures
 CREATE PROCEDURE PARTITION ON TABLE opencalls COLUMN agent_id FROM CLASS callcenter.BeginCall;
 CREATE PROCEDURE PARTITION ON TABLE opencalls COLUMN agent_id FROM CLASS callcenter.EndCall;
---CREATE PROCEDURE FROM CLASS callcenter.StandardDev;
+
+CREATE PROCEDURE TopStdDev
+AS
+  SELECT agent_id, stddev, (sumk / n) AS average
+  FROM stddevbyagent
+  WHERE curdate = TRUNCATE(DAY, NOW)
+  ORDER BY stddev desc
+  LIMIT ?;

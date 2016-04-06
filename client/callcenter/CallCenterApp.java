@@ -39,19 +39,14 @@ import org.voltdb.client.NoConnectionsException;
 import org.voltdb.client.ProcCallException;
 
 /**
- * <p>App that does four simultaneous things on a single-table schema:</p>
+ * <p>Process begin and end call events from a call center. Pair/join
+ * events in VoltDB to create a definitive record of completed calls.</p>
  *
- * <ol>
- * <li>Insert random, timestamped tuples at a high rate.</li>
- * <li>Continuously delete tuples that are either too old or over a table size limit.</li>
- * <li>Check for changes in the maximum value stored in the table.</li>
- * <li>Periodically compute an average of values over various time windows.</li>
- * </ol>
- *
- * <p>It does this by creating task-focused classes that implement Runnable.
- * Each class has a specific job and is scheduled to run periodically in a
- * threadpool. All inter-task communication is done via the main instance of
- * this class.</p>
+ * <p>Use VoltDB's strong consistency and stored procedure logic to
+ * compute a running standard deviation on call length by agent.
+ * This is not a trivial thing to compute without strong consistency.
+ * The provided HTML dashboard shows a top-N list of agents by standard
+ * deviation. It can be found in the "web" folder.</p>
  *
  */
 public class CallCenterApp {
@@ -94,7 +89,7 @@ public class CallCenterApp {
         @Option(desc = "Total count of phone numbers.")
         long numbers = 1500000;
 
-        @Option(desc = "Global maximum history targert. Zero if using row count target.")
+        @Option(desc = "Mean call duration target in seconds.")
         long meancalldurationseconds = 5;
 
         @Option(desc = "Maximum call duration in seconds.")
@@ -113,10 +108,6 @@ public class CallCenterApp {
         }
     }
 
-    /////
-    // PACKAGE VISIBLE SHARED STATE ACCESS BELOW
-    /////
-
     // Reference to the database connection we will use
     final Client client;
 
@@ -126,16 +117,16 @@ public class CallCenterApp {
     // Timer for periodic stats printing
     Timer timer;
     // Benchmark start time
-    long benchmarkStartTS;
+    long benchmarkStartTS = System.currentTimeMillis();
 
     // Statistics manager objects from the client
     final ClientStatsContext periodicStatsContext;
     final ClientStatsContext fullStatsContext;
 
+    // generator for fake call data
     final CallSimulator callSimulator;
+    // perturbation filter for fake call data
     final NetworkSadnessTransformer<CallEvent> networkTransformer;
-
-    final long startTS = System.currentTimeMillis();
 
     /**
      * Provides a callback to be notified on node failure.
@@ -145,7 +136,7 @@ public class CallCenterApp {
         @Override
         public void connectionLost(String hostname, int port, int connectionsLeft, DisconnectCause cause) {
             // if the benchmark is still active, note if a server disconnects
-            final long benchmarkEndTime = startTS + (1000l * config.duration);
+            final long benchmarkEndTime = benchmarkStartTS + (1000l * config.duration);
             if (System.currentTimeMillis() < benchmarkEndTime) {
                 System.err.printf("Connection to %s:%d was lost.\n", hostname, port);
             }
@@ -178,7 +169,7 @@ public class CallCenterApp {
         fullStatsContext = client.createStatsContext();
 
         callSimulator = new CallSimulator(config);
-        networkTransformer = new NetworkSadnessTransformer<>(config, callSimulator);
+        networkTransformer = new NetworkSadnessTransformer<>(callSimulator);
     }
 
     /**
@@ -272,30 +263,7 @@ public class CallCenterApp {
     public synchronized void printResults() throws IOException {
         ClientStats stats = fullStatsContext.fetch().getStats();
 
-        // 1. Voting Board statistics, Voting results and performance statistics
-        /*String display = "\n" +
-                         HORIZONTAL_RULE +
-                         " Voting Results\n" +
-                         HORIZONTAL_RULE +
-                         "\nA total of %,9d votes were received during the benchmark...\n" +
-                         " - %,9d Accepted\n" +
-                         " - %,9d Rejected (Invalid Contestant)\n" +
-                         " - %,9d Rejected (Maximum Vote Count Reached)\n" +
-                         " - %,9d Failed (Transaction Error)\n\n";
-        System.out.printf(display, totalVotes.get(),
-                acceptedVotes.get(), badContestantVotes.get(),
-                badVoteCountVotes.get(), failedVotes.get());
-
-        // 2. Voting results
-        VoltTable result = client.callProcedure("Results").getResults()[0];
-
-        System.out.println("Contestant Name\t\tVotes Received");
-        while(result.advanceRow()) {
-            System.out.printf("%s\t\t%,14d\n", result.getString(0), result.getLong(2));
-        }
-        System.out.printf("\nThe Winner is: %s\n\n", result.fetchRow(0).getString(0));*/
-
-        // 3. Performance statistics
+        // Performance statistics
         System.out.print(HORIZONTAL_RULE);
         System.out.println(" Client Workload Statistics");
         System.out.println(HORIZONTAL_RULE);
@@ -307,14 +275,33 @@ public class CallCenterApp {
     }
 
     /**
+     * Send a call event to either BeginCall or EndCall based on the event.
+     *
+     * @throws NoConnectionsException
+     * @throws IOException
+     * @throws ProcCallException
+     */
+    void sendEvent(CallEvent call) throws NoConnectionsException, IOException, ProcCallException {
+        if (call.endTS == null) {
+            assert(call.startTS != null);
+            client.callProcedure(/*new NullCallback(),*/ "BeginCall",
+                    call.agentId, call.phoneNoStr(), call.callId, call.startTS);
+        }
+        else {
+            assert(call.startTS == null);
+            client.callProcedure(/*new NullCallback(),*/ "EndCall",
+                    call.agentId, call.phoneNoStr(), call.callId, call.endTS);
+        }
+    }
+
+    /**
      * Core benchmark code.
      * Connect. Initialize. Run the loop. Cleanup. Print Results.
+     *
      * @throws InterruptedException
      * @throws IOException
      * @throws NoConnectionsException
      * @throws ProcCallException
-     *
-     * @throws Exception if anything unexpected happens.
      */
     public void run() throws InterruptedException, NoConnectionsException, IOException, ProcCallException {
         System.out.print(HORIZONTAL_RULE);
@@ -336,21 +323,11 @@ public class CallCenterApp {
         long now = System.currentTimeMillis();
         while (warmupEndTime > now) {
             CallEvent call = networkTransformer.next(now);
-
             if (call == null) {
-                now = System.currentTimeMillis();
+                try { Thread.sleep(1); } catch (InterruptedException e) {}
             }
             else {
-                if (call.endTS == null) {
-                    assert(call.startTS != null);
-                    client.callProcedure(/*new NullCallback(),*/ "BeginCall",
-                            call.agentId, call.phoneNoStr(), call.callId, call.startTS);
-                }
-                else {
-                    assert(call.startTS == null);
-                    client.callProcedure(/*new NullCallback(),*/ "EndCall",
-                            call.agentId, call.phoneNoStr(), call.callId, call.endTS);
-                }
+                sendEvent(call);
             }
             now = System.currentTimeMillis();
         }
@@ -371,21 +348,11 @@ public class CallCenterApp {
         now = System.currentTimeMillis();
         while (benchmarkEndTime > now) {
             CallEvent call = networkTransformer.next(now);
-
             if (call == null) {
                 try { Thread.sleep(1); } catch (InterruptedException e) {}
             }
             else {
-                if (call.endTS == null) {
-                    assert(call.startTS != null);
-                    client.callProcedure(/*new NullCallback(),*/ "BeginCall",
-                            call.agentId, call.phoneNoStr(), call.callId, call.startTS);
-                }
-                else {
-                    assert(call.startTS == null);
-                    client.callProcedure(/*new NullCallback(),*/ "EndCall",
-                            call.agentId, call.phoneNoStr(), call.callId, call.endTS);
-                }
+                sendEvent(call);
             }
             now = System.currentTimeMillis();
         }
@@ -393,25 +360,13 @@ public class CallCenterApp {
         // cancel periodic stats printing
         timer.cancel();
 
-        while (true) {
-            CallEvent call = networkTransformer.drain();
-
-            if (call == null) {
-                break;
-            }
-
-            if (call.endTS == null) {
-                assert(call.startTS != null);
-                client.callProcedure(/*new NullCallback(),*/ "BeginCall",
-                        call.agentId, call.phoneNoStr(), call.callId, call.startTS);
-            }
-            else {
-                assert(call.startTS == null);
-                client.callProcedure(/*new NullCallback(),*/ "EndCall",
-                        call.agentId, call.phoneNoStr(), call.callId, call.endTS);
-            }
+        // drain any messages that are waiting to be sent immediately
+        CallEvent call = null;
+        while ((call = networkTransformer.drain()) != null) {
+            sendEvent(call);
         }
 
+        // print out some debugging stats
         callSimulator.printSummary();
 
         // block until all outstanding txns return

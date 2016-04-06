@@ -28,7 +28,15 @@ import java.util.Date;
 import java.util.Queue;
 import java.util.Random;
 
-public class CallSimulator {
+/**
+ * Generator for fake call data.
+ *
+ * Generates pairs of events, begin calls and end calls.
+ *
+ * End calls are scheduled for future delivery.
+ *
+ */
+public class CallSimulator implements EventSource<CallEvent> {
 
     CallCenterApp.CallCenterConfig config;
 
@@ -37,14 +45,13 @@ public class CallSimulator {
 
     final DelayedQueue<CallEvent> delayedEvents = new DelayedQueue<>();
 
+    // used for pacing
     long currentSystemMilliTimestamp = 0;
     double targetEventsPerMillisecond;
     long targetEventsThisMillisecond;
     long eventsSoFarThisMillisecond;
 
-    long drainedEvents = 0;
-    long createdEvents = 0;
-
+    // incrementing counter
     long lastCallIdUsed = 0;
 
     Queue<Integer> agentsAvailable = new ArrayDeque<>();
@@ -71,6 +78,11 @@ public class CallSimulator {
         }
     }
 
+    /**
+     * Generate a random call event with a duration.
+     *
+     * Reserves agent and phone number from the pool.
+     */
     CallEvent[] makeRandomEvent() {
         long callId = ++lastCallIdUsed;
 
@@ -102,6 +114,7 @@ public class CallSimulator {
         event[0] = new CallEvent(callId, agentId, phoneNo, startTS, null);
         event[1] = new CallEvent(callId, agentId, phoneNo, null, endTS);
 
+        // some debugging code
         //System.out.println("Creating event with range:");
         //System.out.println(new Date(startTS.getTime() / 1000));
         //System.out.println(new Date(endTS.getTime() / 1000));
@@ -109,7 +122,18 @@ public class CallSimulator {
         return event;
     }
 
-    CallEvent next(long systemCurrentTimeMillis) {
+    /**
+     * Return the next call event that is safe for delivery or null
+     * if there are no safe objects to deliver.
+     *
+     * Null response could mean empty, or could mean all objects
+     * are scheduled for the future.
+     *
+     * @param systemCurrentTimeMillis The current time.
+     * @return CallEvent
+     */
+    @Override
+    public CallEvent next(long systemCurrentTimeMillis) {
         // check for time passing
         if (systemCurrentTimeMillis > currentSystemMilliTimestamp) {
             // build a target for this 1ms window
@@ -135,7 +159,6 @@ public class CallSimulator {
             phoneNumbersAvailable.add(callEvent.phoneNo);
 
             validate();
-            drainedEvents++;
             return callEvent;
         }
 
@@ -161,11 +184,15 @@ public class CallSimulator {
         eventsSoFarThisMillisecond++;
 
         validate();
-        createdEvents++;
         return event[0];
     }
 
-    CallEvent drain() {
+    /**
+     * Ignore any scheduled delays and return events in
+     * schedule order until empty.
+     */
+    @Override
+    public CallEvent drain() {
         CallEvent callEvent = delayedEvents.drain();
         if (callEvent == null) {
             validate();
@@ -184,6 +211,11 @@ public class CallSimulator {
         return callEvent;
     }
 
+    /**
+     * Smoke check on validity of data structures.
+     * This was useful while getting the code right for this class,
+     * but it doesn't do much now, unless the code needs changes.
+     */
     private void validate() {
         long delayedEventCount = delayedEvents.size();
 
@@ -202,6 +234,9 @@ public class CallSimulator {
         }
     }
 
+    /**
+     * Debug statement to help users verify there are no lost or delayed events.
+     */
     void printSummary() {
         System.out.printf("There are %d agents outstanding and %d phones. %d entries waiting to go.\n",
                 agentsAvailable.size(), phoneNumbersAvailable.size(), delayedEvents.size());

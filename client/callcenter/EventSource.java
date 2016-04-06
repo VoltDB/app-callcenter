@@ -23,34 +23,30 @@
 
 package callcenter;
 
-import java.util.Date;
-
 /**
- * Represents a begin or end call event.
+ * Source of events with a schedule.
  *
- * Begin call has a null endTS.
- * Start call has a null startTS.
+ * No threading or blocking implied.
  *
- * Immutable.
- *
+ * Return null if nothing is ready or present.
  */
-public class CallEvent {
-    final long callId;
-    final int agentId;
-    final long phoneNo;
-    final Date startTS;
-    final Date endTS;
+public interface EventSource<T> {
 
-    CallEvent(long callId, int agentId, long phoneNo, Date startTS, Date endTS) {
-        this.callId = callId;
-        this.agentId = agentId;
-        this.phoneNo = phoneNo;
-        this.startTS = startTS;
-        this.endTS = endTS;
-    }
+    /**
+     * Return the next event that is safe for delivery or null
+     * if there are no safe objects to deliver.
+     *
+     * Null response could mean no events, or could mean all events
+     * are scheduled for the future.
+     *
+     * @param systemCurrentTimeMillis The current time.
+     */
+    public T next(long currentTimeMilliseconds);
 
-    public String phoneNoStr() {
-        return String.format("+1 (%d) %d-%04d",
-                phoneNo / 10000000, (phoneNo / 10000) % 1000, phoneNo % 10000);
-    }
+    /**
+     * Ignore any scheduled delays and return events in
+     * schedule order until empty.
+     */
+    public T drain();
+
 }
